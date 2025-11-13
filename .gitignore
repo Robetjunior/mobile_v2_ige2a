@@ -32,6 +32,9 @@ yarn-error.*
 
 # local env files
 .env*.local
+# ignore generic env files
+.env
+wow-charger-ige2a/.env
 
 # typescript
 *.tsbuildinfo
