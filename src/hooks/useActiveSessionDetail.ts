@@ -23,8 +23,8 @@ export function useActiveSessionDetail(chargeBoxId?: string, opts: { polling?: b
     refetchInterval: (data) => {
       if (!polling) return false;
       const tx = data?.session?.transaction_id;
-      // faz polling enquanto não houver sessão concluída
-      return tx ? 4_000 : 6_000;
+      // polling mais responsivo quando há sessão ativa
+      return tx ? 3_000 : 5_000;
     },
     retry: (failureCount, error: any) => {
       if (error?.status === 401 || error?.status === 404 || error?.status === 409 || error?.status === 422) return false;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ChargerStation, NearbyQuery } from '../types';
 import { listChargers } from '../services/chargerService';
 import { LOGGER } from '../utils/logger';
+import { API_BASE, ensureApiKey } from '../services/http';
 
 type StationState = {
   items: ChargerStation[];
@@ -17,9 +18,14 @@ type StationState = {
   setSearch: (s: string) => void;
   setFilters: (f: { status?: StationState['status']; minPowerKw?: number }) => void;
   setItems: (items: ChargerStation[]) => void;
+  subscribeStatusChanges: () => Promise<void>;
+  unsubscribeStatusChanges: () => void;
 };
 
-export const useStationStore = create<StationState>((set) => ({
+let statusSse: EventSource | null = null;
+let statusSseReconnect: NodeJS.Timeout | null = null;
+
+export const useStationStore = create<StationState>((set, get) => ({
   items: [],
   loading: false,
   error: undefined,
@@ -47,4 +53,48 @@ export const useStationStore = create<StationState>((set) => ({
   setSearch: (s) => set({ search: s }),
   setFilters: (f) => set({ status: f.status, minPowerKw: f.minPowerKw }),
   setItems: (items) => set({ items }),
+  subscribeStatusChanges: async () => {
+    if (statusSse) return;
+    const apiKey = await ensureApiKey().catch(() => undefined);
+    const params = new URLSearchParams();
+    params.set('types', 'status-change');
+    params.set('pingMs', '20000');
+    if (apiKey) params.set('apiKey', apiKey as string);
+    const url = `${API_BASE}/v1/stream?${params.toString()}`;
+    try {
+      const es = new EventSource(url);
+      statusSse = es;
+      const toStatus = (overall?: string): 'available' | 'busy' | 'offline' | 'unknown' => {
+        const s = String(overall || '').toLowerCase();
+        if (['available','preparing','suspendedev','finishing','ready'].includes(s)) return 'available';
+        if (['charging','busy','occupied'].includes(s)) return 'busy';
+        if (['faulted','unavailable','offline'].includes(s)) return 'offline';
+        return 'unknown';
+      };
+      es.addEventListener('status-change', (evt: MessageEvent) => {
+        try {
+          const data = JSON.parse((evt as any).data || '{}');
+          const id = String(data?.chargeBoxId || data?.id || '');
+          const next = toStatus(data?.status);
+          if (!id) return;
+          const items = get().items;
+          if (!items || items.length === 0) return;
+          const updated = items.map((it) => (it.id === id ? { ...it, status: next } : it));
+          set({ items: updated });
+        } catch {}
+      });
+      es.addEventListener('error', () => {
+        try { statusSse?.close?.(); } catch {}
+        statusSse = null;
+        if (statusSseReconnect) clearTimeout(statusSseReconnect);
+        statusSseReconnect = setTimeout(() => { void get().subscribeStatusChanges(); }, 5000);
+      });
+    } catch {}
+  },
+  unsubscribeStatusChanges: () => {
+    try { statusSse?.close?.(); } catch {}
+    statusSse = null;
+    if (statusSseReconnect) clearTimeout(statusSseReconnect);
+    statusSseReconnect = null;
+  },
 }));

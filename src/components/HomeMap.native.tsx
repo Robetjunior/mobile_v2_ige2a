@@ -213,15 +213,31 @@ export default function HomeMap({ stations, userLat, userLon, lastStatusCode, on
                 <Text style={{ marginTop: 2, color: '#6B7280' }}>HTTP: {lastStatusCode === 0 ? 'carregando' : String(typeof lastStatusCode === 'number' ? lastStatusCode : 0)}</Text>
                 {/* Ações */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
-                  <View style={{ backgroundColor: '#0A84FF', borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 6, marginRight: 10 }}>
-                    <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Ver detalhes</Text>
-                  </View>
-                  <View style={{ borderColor: '#0A84FF', borderWidth: 1, borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 6, marginRight: 10 }}>
+                  {!!onOpenDetails && (
+                    <Pressable
+                      onPress={() => { feedbackClick(); onOpenDetails?.(s.id); }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Ver carregamento"
+                      style={{ backgroundColor: '#0A84FF', borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 6, marginRight: 10 }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Ver carregamento</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    onPress={() => { feedbackClick(); onSelectStation(s.id); }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Iniciar carga"
+                    style={{ borderColor: '#0A84FF', borderWidth: 1, borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 6, marginRight: 10 }}
+                  >
                     <Text style={{ color: '#0A84FF', fontWeight: '600' }}>Iniciar carga</Text>
-                  </View>
-                  <View>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => { feedbackClick(); openExternalMap(s.latitude, s.longitude); }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Navegar para o posto"
+                  >
                     <Text style={{ color: '#0A84FF' }}>Navegar</Text>
-                  </View>
+                  </Pressable>
                 </View>
                 <Text style={{ color: '#6B7280', marginTop: 6 }}>Toque no balão para abrir detalhes</Text>
               </View>
@@ -293,8 +309,8 @@ export default function HomeMap({ stations, userLat, userLon, lastStatusCode, on
           ); })()}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
             {!!onOpenDetails && (
-              <Pressable onPress={() => { feedbackClick(); onOpenDetails?.(selected.id); }} accessibilityRole="button" accessibilityLabel="Ver detalhes" style={{ backgroundColor: '#0A84FF', borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 8, marginRight: 10 }}>
-                <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Ver detalhes</Text>
+              <Pressable onPress={() => { feedbackClick(); onOpenDetails?.(selected.id); }} accessibilityRole="button" accessibilityLabel="Ver carregamento" style={{ backgroundColor: '#0A84FF', borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 8, marginRight: 10 }}>
+                <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Ver carregamento</Text>
               </Pressable>
             )}
             <Pressable onPress={() => { feedbackClick(); onSelectStation(selected.id); }} accessibilityRole="button" accessibilityLabel="Iniciar carga" style={{ borderColor: '#0A84FF', borderWidth: 1, borderRadius: UI_TOKENS.radius.pill, paddingHorizontal: 12, paddingVertical: 8, marginRight: 10 }}>

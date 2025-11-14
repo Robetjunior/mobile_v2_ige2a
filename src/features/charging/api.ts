@@ -1,13 +1,14 @@
 import { client } from '../../api/client';
 import { pollCommand } from '../../services/chargeService';
 
-export type StartChargingBody = { chargeBoxId: string; idTag: string; connectorId?: number };
+export type StartChargingBody = { chargeBoxId: string; idTag: string; connectorId?: number; force?: boolean };
 export type StopChargingBody = { transactionId: number; chargeBoxId?: string };
 
 export async function startCharging(body: StartChargingBody): Promise<{ commandId?: string | number; status?: string }>
 {
   const payload = { chargeBoxId: body.chargeBoxId, idTag: body.idTag, ...(typeof body.connectorId === 'number' ? { connectorId: body.connectorId } : {}) };
-  return client.post('/v1/commands/remoteStart', payload, { timeoutMs: 15000 });
+  const path = body.force ? '/v1/commands/remoteStart?force=1' : '/v1/commands/remoteStart';
+  return client.post(path, payload, { timeoutMs: 15000 });
 }
 
 export { pollCommand };

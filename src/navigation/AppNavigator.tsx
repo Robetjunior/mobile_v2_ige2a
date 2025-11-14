@@ -2,8 +2,11 @@ import React from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TabNavigator from './TabNavigator';
+import AuthNavigator from './AuthNavigator';
 import { View, Text, Pressable } from 'react-native';
 import { linking } from './linking';
+import { AuthProvider, useAuth } from '../hooks/useAuth';
+import { Platform } from 'react-native';
 import ChargeScreen from '../screens/ChargeScreen';
 import ChargerDetailScreen from '../screens/ChargerDetailScreen';
 import MeScreen from '../screens/Me/MeScreen';
@@ -24,6 +27,8 @@ export type RootStackParamList = {
   Support: undefined;
   About: undefined;
   RecentlyUsed: undefined;
+  // Rota técnica para callback OAuth (não possui tela)
+  AuthCallback: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -50,28 +55,47 @@ function SimpleScreen({ title }: { title: string }) {
   );
 }
 
-export default function AppNavigator() {
+function AppStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen
+        name="Tabs"
+        component={TabNavigator}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen name="ChargerDetail" component={ChargerDetailScreen} options={{ title: 'Carregador' }} />
+      <Stack.Screen name="Charge" component={ChargeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ChargingSession" component={ChargingSession} options={{ title: 'Charging Session' }} />
+      <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ title: 'Scanner' }} />
+      <Stack.Screen name="Cards" component={CardsScreen} options={{ title: 'Cards' }} />
+      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <Stack.Screen name="Support" children={() => <SimpleScreen title="Support" />} />
+      <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About' }} />
+      <Stack.Screen name="RecentlyUsed" component={RecentlyUsedScreen} options={{ title: 'Recently Used' }} />
+    </Stack.Navigator>
+  );
+}
+
+function Root() {
+  const { session, loading } = useAuth();
+  // Para testes: permitir bypass da autenticação e abrir diretamente a Home
+  // - Em web, sempre bypass para facilitar acesso a /home durante desenvolvimento
+  // - Em mobile/web, também pode ativar via EXPO_PUBLIC_BYPASS_AUTH=true
+  const bypassAuth = (__DEV__ === true) || process.env.EXPO_PUBLIC_BYPASS_AUTH === 'true' || Platform.OS === 'web';
   return (
     <NavigationContainer linking={linking} theme={{
       ...DefaultTheme,
       colors: { ...DefaultTheme.colors, background: '#fff' },
     }}>
-      <Stack.Navigator>
-        <Stack.Screen
-          name="Tabs"
-          component={TabNavigator}
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen name="ChargerDetail" component={ChargerDetailScreen} options={{ title: 'Carregador' }} />
-        <Stack.Screen name="Charge" component={ChargeScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="ChargingSession" component={ChargingSession} options={{ title: 'Charging Session' }} />
-        <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ title: 'Scanner' }} />
-        <Stack.Screen name="Cards" component={CardsScreen} options={{ title: 'Cards' }} />
-        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
-        <Stack.Screen name="Support" children={() => <SimpleScreen title="Support" />} />
-        <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About' }} />
-        <Stack.Screen name="RecentlyUsed" component={RecentlyUsedScreen} options={{ title: 'Recently Used' }} />
-      </Stack.Navigator>
+      {loading ? null : (bypassAuth ? <AppStack /> : (session ? <AppStack /> : <AuthNavigator />))}
     </NavigationContainer>
+  );
+}
+
+export default function AppNavigator() {
+  return (
+    <AuthProvider>
+      <Root />
+    </AuthProvider>
   );
 }

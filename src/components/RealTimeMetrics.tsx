@@ -12,7 +12,7 @@ export default function RealTimeMetrics({ metrics, onViewDetails, onStop }: Prop
   return (
     <View style={{ padding: 16, backgroundColor: '#F2F2F7' }}>
       <Text style={{ fontWeight: '600', marginBottom: 8 }}>Sessão ativa</Text>
-      <Text>{metrics.energyKwh.toFixed(2)} kWh • {metrics.powerKw} kW • {metrics.durationMinutes} min</Text>
+      <Text>{metrics.energyKwh.toFixed(3)} kWh • {metrics.powerKw.toFixed?.(3) ?? metrics.powerKw} kW • {metrics.durationMinutes} min</Text>
       <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
         <Pressable onPress={onViewDetails} accessibilityRole="button" accessibilityLabel="Ver detalhes">
           <Text style={{ color: '#0A84FF' }}>Ver detalhes</Text>

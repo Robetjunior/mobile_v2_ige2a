@@ -27,7 +27,7 @@ export default function HomeScreen() {
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { permission, requestPermission, getCurrent, lat, lon, error: locError } = useLocationStore();
-  const { items, loading, error, lastStatusCode, radiusKm, search, status, minPowerKw, fetchNearby, setRadius, setSearch, setFilters, setItems } = useStationStore();
+  const { items, loading, error, lastStatusCode, radiusKm, search, status, minPowerKw, fetchNearby, setRadius, setSearch, setFilters, setItems, subscribeStatusChanges, unsubscribeStatusChanges } = useStationStore();
   const { current, start, stop } = useSessionStore();
 
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -87,6 +87,11 @@ export default function HomeScreen() {
     onInit();
   }, [onInit]);
 
+  useEffect(() => {
+    void subscribeStatusChanges();
+    return () => { unsubscribeStatusChanges(); };
+  }, []);
+
   // Mostrar log por 5s após concluir uma busca
   useEffect(() => {
     if (!loading && lastQueryRef.current) {
@@ -131,7 +136,8 @@ export default function HomeScreen() {
   }, [nav]);
 
   const openDetails = useCallback((id: string) => {
-    nav.navigate('ChargerDetail', { chargeBoxId: id });
+    // Direciona diretamente para a tela de carregamento (segundo layout)
+    nav.navigate('Charge', { chargeBoxId: id });
   }, [nav]);
 
   const headerContent = useMemo(() => (
@@ -193,12 +199,12 @@ export default function HomeScreen() {
 
       {/* Mapa ocupa o restante */}
       <View style={{ flex: 1 }}>
-        <HomeMap
+          <HomeMap
           stations={items}
           userLat={lat}
           userLon={lon}
           lastStatusCode={lastStatusCode}
-          onSelectStation={openStation}
+          onSelectStation={(id: string) => openDetails(id)}
           onOpenDetails={(id: string) => openDetails(id)}
           onRecenter={async () => {
             const pos = await getCurrent();

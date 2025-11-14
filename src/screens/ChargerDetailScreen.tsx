@@ -109,7 +109,8 @@ export default function ChargerDetailScreen() {
     try {
       const res = await stopChargingFlow({ chargeBoxId });
       const cmdId = res?.commandId ?? (res as any)?.id; if (cmdId) setCommandId(cmdId);
-      if (res.status !== 'accepted' && res.status !== 'completed') { throw new Error(`Stop não aceito: ${res.status}`); }
+      // Aceitar 'pending' como transitório; confirmar via detalhe ativo
+      if (!['accepted','completed','pending'].includes(res.status)) { throw new Error(`Stop não aceito: ${res.status}`); }
       const active = await getActiveDetail(chargeBoxId).catch(() => undefined);
       const tid = active?.session?.transaction_id; setTxId(tid);
       setScreenState(tid ? 'charging' : 'stopped');

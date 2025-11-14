@@ -1,5 +1,5 @@
 import { client } from '../../api/client';
-import { stopCharging, pollCommand, getFinalSession, getEvents } from './api';
+import { stopCharging, getFinalSession, getEvents } from './api';
 
 export type StopResult = {
   commandId?: string | number;
@@ -9,10 +9,13 @@ export type StopResult = {
   events?: any;
 };
 
-export async function stopChargingFlow({ chargeBoxId }: { chargeBoxId: string }): Promise<StopResult> {
-  // Busca sessão ativa para obter transactionId; fallback: chargers/{cbid}.lastTransactionId
-  const active = await client.get<any>(`/v1/sessions/active/${chargeBoxId}`).catch(() => undefined);
-  let txId: number | undefined = active?.session?.transaction_id ?? active?.session?.transaction_pk;
+export async function stopChargingFlow({ chargeBoxId, transactionId }: { chargeBoxId: string; transactionId?: number }): Promise<StopResult> {
+  // Usa transactionId fornecido quando disponível; caso contrário, busca sessão ativa e fallback para último tx
+  let txId: number | undefined = typeof transactionId === 'number' ? transactionId : undefined;
+  if (!txId) {
+    const active = await client.get<any>(`/v1/sessions/active/${chargeBoxId}`).catch(() => undefined);
+    txId = active?.session?.transaction_id ?? active?.session?.transaction_pk;
+  }
   if (!txId) {
     const charger = await client.get<any>(`/v1/chargers/${chargeBoxId}`).catch(() => undefined);
     txId = charger?.lastTransactionId ?? charger?.last_transaction_id;
@@ -30,18 +33,20 @@ export async function stopChargingFlow({ chargeBoxId }: { chargeBoxId: string })
     throw e;
   });
   const commandId = stop?.commandId ?? (stop as any)?.id;
-
-  // Poll do comando
-  const final = await pollCommand(commandId || '', { timeoutMs: 180000, intervalMs: 1500 });
-  // Tratar tanto 'accepted' quanto 'completed' como sucesso
-  if (final.status !== 'accepted' && final.status !== 'completed') {
-    return { commandId, status: final.status, idempotentDuplicate: final.idempotentDuplicate };
+  const stopStatus = (stop as any)?.status ?? 'pending';
+  // Se rejeitado/erro, retorna imediatamente
+  if (['rejected','error'].includes(stopStatus)) {
+    return { commandId, status: stopStatus };
   }
-
-  // Confirma sessão encerrada
-  const session = await getFinalSession(txId);
+  // Confirma sessão encerrada via /v1/sessions/:tx com polling leve
+  let session = await getFinalSession(txId).catch(() => undefined);
+  const startedAt = Date.now();
+  while (!((session?.session?.stopped_at) || (session?.session?.is_active === false)) && Date.now() - startedAt < 90000) {
+    await new Promise((r) => setTimeout(r, 2000));
+    session = await getFinalSession(txId).catch(() => undefined);
+  }
   // Opcional: eventos StopTransaction
   const events = await getEvents(txId).catch(() => undefined);
-
-  return { commandId, status: final.status, idempotentDuplicate: final.idempotentDuplicate, session, events };
+  const finalStatus = ((session?.session?.stopped_at) || (session?.session?.is_active === false)) ? 'completed' : stopStatus;
+  return { commandId, status: finalStatus, session, events };
 }

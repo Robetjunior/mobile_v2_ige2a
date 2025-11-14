@@ -21,7 +21,7 @@ export function useSessionById(transactionId?: number, opts: { polling?: boolean
     refetchInterval: (data) => {
       if (!polling) return false;
       const completed = data?.status === 'completed' || !!data?.stopped_at;
-      return completed ? false : 3_000;
+      return completed ? false : 2_000;
     },
     retry: (failureCount, error: any) => {
       if (error?.status === 401 || error?.status === 404 || error?.status === 409 || error?.status === 422) return false;
