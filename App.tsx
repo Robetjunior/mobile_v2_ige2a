@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import AppNavigator from './src/navigation/AppNavigator';
+import RootNavigator from './src/navigation/RootNavigator';
 import { ensureApiKey } from './src/services/http';
 import { DEFAULT_API_KEY } from './src/constants/env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -40,7 +40,7 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         <QueryClientProvider client={queryClient}>
-          <AppNavigator />
+          <RootNavigator />
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

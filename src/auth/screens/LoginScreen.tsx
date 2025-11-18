@@ -3,9 +3,9 @@ import { View, Text, Switch } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import AuthInput from '../components/AuthInput';
-import AuthButton from '../components/AuthButton';
-import { useAuth } from '../hooks/useAuth';
+import AuthInput from '../../components/AuthInput';
+import AuthButton from '../../components/AuthButton';
+import { useAuth } from '../context/AuthContext';
 
 type Mode = 'normal' | 'quick';
 

@@ -23,6 +23,22 @@ async function getApiKey(): Promise<string | undefined> {
   return cachedApiKey;
 }
 
+async function getAuthToken(): Promise<string | undefined> {
+  try {
+    const raw = await SecureStore.getItemAsync('AUTH_SESSION');
+    if (raw) {
+      const parsed = JSON.parse(raw || '{}');
+      const token = parsed?.access_token as string | undefined;
+      if (token) return token;
+    }
+  } catch {}
+  try {
+    const token = await SecureStore.getItemAsync('authToken');
+    if (token) return token || undefined;
+  } catch {}
+  return undefined;
+}
+
 instance.interceptors.request.use(async (cfg) => {
   // Aplica X-API-Key e Content-Type apenas em rotas /v1/**
   const url = cfg.url || '';
@@ -35,6 +51,13 @@ instance.interceptors.request.use(async (cfg) => {
     if (cfg.data && !('Content-Type' in (cfg.headers || {}))) {
       (cfg.headers as any)['Content-Type'] = 'application/json';
     }
+  }
+  const authToken = await getAuthToken();
+  if (authToken) {
+    cfg.headers = {
+      ...(cfg.headers || {}),
+      Authorization: `Bearer ${authToken}`,
+    } as any;
   }
   return cfg;
 });

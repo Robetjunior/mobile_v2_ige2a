@@ -1,9 +1,9 @@
 import React from 'react';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import HomeScreen from '../screens/HomeScreen';
+import HomeScreen from '../chargers/screens/HomeMapScreen';
 import ChargeScreen from '../screens/ChargeScreen';
-import RecordScreen from '../screens/RecordScreen';
+import HistoryScreen from '../sessions/screens/HistoryScreen';
 import { View, Text, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UI_TOKENS } from '../constants';
@@ -122,7 +122,7 @@ const TabNavigatorComp = () => {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Charge" component={ChargeScreen} />
       <Tab.Screen name="QR" component={() => <Placeholder title="QR" />} options={{ tabBarLabel: () => null }} />
-      <Tab.Screen name="Record" component={RecordScreen} />
+      <Tab.Screen name="Record" component={HistoryScreen} />
       <Tab.Screen name="Me" component={MeScreen} />
     </Tab.Navigator>
   );

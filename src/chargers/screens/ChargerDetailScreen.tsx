@@ -2,15 +2,15 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Linking } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { UI_TOKENS } from '../constants';
-import { http } from '../services/http';
-import LoadingSpinner from '../components/LoadingSpinner';
-import { getActiveDetail } from '../services/chargeService';
-import { startChargingFlow } from '../features/charging/startFlow';
-import { stopChargingFlow } from '../features/charging/stopFlow';
-import { useUserStore } from '../stores/useUserStore';
-import { useChargerDetail } from '../hooks/useChargerDetail';
-import { setJson } from '../utils/storage';
+import { UI_TOKENS } from '../../constants';
+import { http } from '../../api/http';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import { getActiveDetail } from '../../services/chargeService';
+import { startChargingFlow } from '../../features/charging/startFlow';
+import { stopChargingFlow } from '../../features/charging/stopFlow';
+import { useUserStore } from '../../stores/useUserStore';
+import { useChargerDetail } from '../../hooks/useChargerDetail';
+import { setJson } from '../../utils/storage';
 
 type Connector = { id?: number; type?: string; powerKw?: number; status?: string };
 type ChargerDetail = {

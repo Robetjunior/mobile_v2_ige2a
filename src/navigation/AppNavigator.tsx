@@ -1,20 +1,15 @@
 import React from 'react';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TabNavigator from './TabNavigator';
-import AuthNavigator from './AuthNavigator';
-import { View, Text, Pressable } from 'react-native';
-import { linking } from './linking';
-import { AuthProvider, useAuth } from '../hooks/useAuth';
-import { Platform } from 'react-native';
+import { View, Text } from 'react-native';
 import ChargeScreen from '../screens/ChargeScreen';
-import ChargerDetailScreen from '../screens/ChargerDetailScreen';
+import ChargerDetailScreen from '../chargers/screens/ChargerDetailScreen';
 import MeScreen from '../screens/Me/MeScreen';
 import SettingsScreen from '../screens/Settings/SettingsScreen';
 import CardsScreen from '../screens/Cards/CardsScreen';
 import RecentlyUsedScreen from '../screens/RecentlyUsed/RecentlyUsedScreen';
 import AboutScreen from '../screens/About/AboutScreen';
-import ChargingSession from '../screens/ChargingSession';
+import ChargingSession from '../sessions/screens/SessionScreen';
 
 export type RootStackParamList = {
   Tabs: undefined;
@@ -55,7 +50,7 @@ function SimpleScreen({ title }: { title: string }) {
   );
 }
 
-function AppStack() {
+export default function AppNavigator() {
   return (
     <Stack.Navigator>
       <Stack.Screen
@@ -73,29 +68,5 @@ function AppStack() {
       <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About' }} />
       <Stack.Screen name="RecentlyUsed" component={RecentlyUsedScreen} options={{ title: 'Recently Used' }} />
     </Stack.Navigator>
-  );
-}
-
-function Root() {
-  const { session, loading } = useAuth();
-  // Para testes: permitir bypass da autenticação e abrir diretamente a Home
-  // - Em web, sempre bypass para facilitar acesso a /home durante desenvolvimento
-  // - Em mobile/web, também pode ativar via EXPO_PUBLIC_BYPASS_AUTH=true
-  const bypassAuth = (__DEV__ === true) || process.env.EXPO_PUBLIC_BYPASS_AUTH === 'true' || Platform.OS === 'web';
-  return (
-    <NavigationContainer linking={linking} theme={{
-      ...DefaultTheme,
-      colors: { ...DefaultTheme.colors, background: '#fff' },
-    }}>
-      {loading ? null : (bypassAuth ? <AppStack /> : (session ? <AppStack /> : <AuthNavigator />))}
-    </NavigationContainer>
-  );
-}
-
-export default function AppNavigator() {
-  return (
-    <AuthProvider>
-      <Root />
-    </AuthProvider>
   );
 }

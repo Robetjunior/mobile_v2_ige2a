@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { ChargerStation, NearbyQuery } from '../types';
-import { listChargers } from '../services/chargerService';
+import { listChargers } from '../api/chargeService';
 import { LOGGER } from '../utils/logger';
-import { API_BASE, ensureApiKey } from '../services/http';
+import { API_BASE, ensureApiKey } from '../api/http';
 
 type StationState = {
   items: ChargerStation[];

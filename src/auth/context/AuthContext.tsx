@@ -1,7 +1,7 @@
 import React from 'react';
 import { Linking, Platform } from 'react-native';
-import { getSupabase, AuthSession } from '../services/supabaseClient';
-import { clearSession, loadSession, saveSession, getRememberEmail, setRememberEmail } from '../services/sessionStorage';
+import { getSupabase, AuthSession } from '../../services/supabaseClient';
+import { clearSession, loadSession, saveSession, getRememberEmail, setRememberEmail } from '../../services/sessionStorage';
 
 type AuthState = {
   session?: AuthSession;
