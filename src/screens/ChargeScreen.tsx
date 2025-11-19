@@ -47,10 +47,14 @@ export default function ChargeScreen() {
   }, [detail]);
   const isDetailActive = useMemo(() => ((detail as any)?.session?.is_active === true) || ((detail as any)?.session?.isActive === true), [detail]);
   const isDetailStopped = useMemo(() => ((detail as any)?.session?.is_active === false) || ((detail as any)?.session?.isActive === false) || !!((detail as any)?.session?.stopped_at), [detail]);
-  const isSnapshotAvailable = useMemo(() => (snapshot?.status === 'Available') || (snapshot?.status === 'AVAILABLE'), [snapshot?.status]);
-  const isDesync = useMemo(() => isSnapshotAvailable && hasTx && isDetailActive, [isSnapshotAvailable, hasTx, isDetailActive]);
-  const canStop = useMemo(() => hasTx && isDetailActive, [hasTx, isDetailActive]);
-  const canStart = useMemo(() => (!hasTx) && isSnapshotAvailable, [hasTx, isSnapshotAvailable]);
+  const isSnapshotAvailable = useMemo(() => snapshot?.status === 'Available', [snapshot?.status]);
+  const isDesync = useMemo(() => isSnapshotAvailable && hasTx, [isSnapshotAvailable, hasTx]);
+  const canStart = useMemo(() => isSnapshotAvailable && !hasTx, [isSnapshotAvailable, hasTx]);
+  const canStop = useMemo(() => hasTx, [hasTx]);
+
+  useEffect(() => {
+    setState(hasTx ? 'charging' : 'idle');
+  }, [hasTx]);
 
   const loadInitial = useCallback(async (id: string) => {
     try {
@@ -106,9 +110,6 @@ export default function ChargeScreen() {
             const tel = data?.telemetry || {};
             Telemetry.track('charge.sse_event', { chargeBoxId: id, type: 'telemetry-updated' });
             const tid = typeof data?.transactionId === 'number' ? data.transactionId : undefined;
-            if (typeof tid === 'number' && tid > 0) {
-              setState('charging');
-            }
             setDetail((prev) => {
               const p = prev || {} as SessionDetail;
               const updatedTelemetry = {
@@ -143,18 +144,18 @@ export default function ChargeScreen() {
             if (status) {
               setSnapshot((prev) => ({ ...(prev || {}), status }));
               const lower = String(status).toLowerCase();
-              const readyStates = ['available','preparing','suspendedev','finishing'];
-              if (readyStates.includes(lower)) {
+              if (lower === 'available') {
                 // Confirma sessão ativa com backend; se não houver TX, liberar para novo início
                 try {
                   const ad = await getActiveDetail(id).catch(() => undefined);
                   const activeTx = ad?.session?.transaction_id;
-                  const isActive = ad?.session?.is_active !== false && !!activeTx;
+                  const isActive = !!(activeTx && (ad?.session?.is_active === true || ad?.session?.isActive === true) && !ad?.session?.stopped_at);
                   if (!isActive) {
                     setDetail((prev) => ({ ...(prev || {}), session: { ...(prev?.session || {}), transaction_id: undefined, is_active: false } } as any));
                     setState('idle');
                     setStopStatus('Pronto para iniciar um novo carregamento');
                     if (progressPollRef.current) { clearInterval(progressPollRef.current); progressPollRef.current = null; }
+                    autoStartHandledRef.current = false;
                   }
                 } catch {}
               }
@@ -481,16 +482,33 @@ export default function ChargeScreen() {
     try { LOGGER.API.info('charge.autostart_effect', { params: (route as any)?.params, cpId, autoStart: !!auto, state, canStart, canStop, isDesync, hasTx }); } catch {}
     if (!auto) return;
     if (autoStartHandledRef.current) return;
-    if (isDesync && canStop && !loading) {
+    if (isDesync && hasTx && !loading) {
       autoStartHandledRef.current = true;
       onStop();
       return;
     }
-    if (!hasTx && !loading) {
+    if (!hasTx && !loading && canStart) {
       autoStartHandledRef.current = true;
       onStart();
     }
-  }, [route, hasTx, isDesync, canStop, loading, onStart, onStop, state, canStart]);
+  }, [route, hasTx, isDesync, loading, onStart, onStop, canStart, cpId]);
+
+  useEffect(() => {
+    if (!hasTx) {
+      setState('idle');
+      setDetail((prev) => {
+        const base = prev || {} as SessionDetail;
+        const clearedTelemetry = { kwh: 0, power_kw: 0, voltage_v: 0, current_a: 0, temperature_c: 0, soc_percent_at: 0, at: undefined } as any;
+        const clearedProgress = { energy_kwh: 0, price_total: 0, price_unit: 0, duration_seconds: 0 } as any;
+        const clearedSession = { ...(base.session || {}), transaction_id: undefined, is_active: false } as any;
+        return { ...base, telemetry: clearedTelemetry, progress: clearedProgress, session: clearedSession } as SessionDetail;
+      });
+      setLowPowerSince(undefined);
+      if (isSnapshotAvailable) {
+        autoStartHandledRef.current = false;
+      }
+    }
+  }, [hasTx, activeSession?.transaction_id, activeSession?.stopped_at, snapshot?.status]);
 
   // Poll de progresso por transactionId
   useEffect(() => {
@@ -701,11 +719,9 @@ export default function ChargeScreen() {
     const custom = (route as any)?.params?.statusText;
     if (typeof custom === 'string' && custom.trim()) return custom.trim();
     if (state === 'stopping') return 'Encerrando sessão anterior…';
-    if (isDesync) return 'Sincronizando sessão…';
-    if (canStop) return 'Carregamento em progresso';
-    if (canStart) return 'Pronto para iniciar';
-    return 'Verificando estado do carregador…';
-  }, [route, state, isDesync, canStop, canStart]);
+    if (hasTx) return 'Carregamento em progresso';
+    return 'Nenhum carregamento em andamento';
+  }, [route, state, hasTx]);
 
   return (
     <View style={{ flex: 1, backgroundColor: UI_TOKENS.colors.tabBg }}>
@@ -716,18 +732,26 @@ export default function ChargeScreen() {
         <View style={{ backgroundColor: UI_TOKENS.colors.headerBg, alignItems: 'center', paddingTop: 12, paddingBottom: 12 }}>
           <ProgressRing percent={typeof pctAnim === 'number' ? Math.min(100, Math.max(0, pctAnim)) : undefined} size={Math.max(150, Math.min(200, Math.floor(height * 0.26)))} vibrant={state === 'charging'} />
           <Text style={{ marginTop: 8, color: '#D1D5DB', fontSize: 12 }}>{snapshot?.connector || 'Conector 1'}</Text>
-          <Pressable
-            onPress={(isDesync || canStop) ? onStop : onStart}
-            disabled={loading || (!(isDesync || canStop || canStart))}
-            accessibilityRole="button"
-            style={({ pressed }) => ([
-              { marginTop: 12, height: 52, minWidth: Math.min(360, Math.floor(width * 0.9)), borderRadius: 26, backgroundColor: '#9CA3AF', alignItems: 'center', justifyContent: 'center' },
-              pressed && { opacity: 0.95 },
-              (loading || (!(isDesync || canStop || canStart))) && { opacity: 0.6 },
-            ])}
-          >
-            <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '600' }}>{state === 'stopping' ? 'Encerrando…' : ((isDesync || canStop) ? 'Parar Carregamento' : 'Iniciar Carregamento')}</Text>
-          </Pressable>
+          {(() => {
+            const isCharging = hasTx;
+            const buttonLabel = isCharging ? 'Parar Carregamento' : 'Iniciar Carregamento';
+            const buttonDisabled = loading || (isCharging ? !canStop : !canStart);
+            const onPressHandler = isCharging ? onStop : onStart;
+            return (
+              <Pressable
+                onPress={onPressHandler}
+                disabled={buttonDisabled}
+                accessibilityRole="button"
+                style={({ pressed }) => ([
+                  { marginTop: 12, height: 52, minWidth: Math.min(360, Math.floor(width * 0.9)), borderRadius: 26, backgroundColor: '#9CA3AF', alignItems: 'center', justifyContent: 'center' },
+                  pressed && { opacity: 0.95 },
+                  buttonDisabled && { opacity: 0.6 },
+                ])}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '600' }}>{state === 'stopping' ? 'Encerrando…' : buttonLabel}</Text>
+              </Pressable>
+            );
+          })()}
           {state === 'starting' && (
             <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <LoadingSpinner size={18} />
