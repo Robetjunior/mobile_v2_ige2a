@@ -508,7 +508,7 @@ export default function ChargeScreen() {
         autoStartHandledRef.current = false;
       }
     }
-  }, [hasTx, activeSession?.transaction_id, activeSession?.stopped_at, snapshot?.status]);
+  }, [hasTx, detail?.session?.transaction_id, detail?.session?.stopped_at, snapshot?.status]);
 
   // Poll de progresso por transactionId
   useEffect(() => {
