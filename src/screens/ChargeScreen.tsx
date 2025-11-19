@@ -15,6 +15,7 @@ import { stopChargingFlow } from '../features/charging/stopFlow';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useUserStore } from '../stores/useUserStore';
 import TelemetryCard from '../components/TelemetryCard';
+import ProgressRing from '../components/ProgressRing';
 
 type ScreenState = 'idle' | 'starting' | 'charging' | 'stopping' | 'stopped' | 'error';
 
@@ -39,18 +40,17 @@ export default function ChargeScreen() {
   const { width, height } = useWindowDimensions();
   const [lastHbAt, setLastHbAt] = useState<string | undefined>(undefined);
 
-  // Guards
-  const canStart = useMemo(() => {
-    const hasTx = !!detail?.session?.transaction_id;
-    const isEnded = detail?.session?.is_active === false || !!detail?.session?.stopped_at;
-    const uiReady = state === 'idle' || state === 'error';
-    const hbAge = lastHbAt ? (Date.now() - new Date(lastHbAt).getTime()) : Infinity;
-    const online = hbAge <= 90000;
-    const s = String(snapshot?.status || '').toLowerCase();
-    const connectorAvailable = ['available','preparing','suspendedev','finishing'].includes(s);
-    return !!cpId && uiReady && online && connectorAvailable && (!hasTx || isEnded);
-  }, [cpId, detail, state, lastHbAt, snapshot?.status]);
-  const canStop = useMemo(() => !!detail?.session?.transaction_id && !!cpId, [detail, cpId]);
+  // Helpers/guards
+  const hasTx = useMemo(() => {
+    const s: any = (detail as any)?.session;
+    return !!(s?.transaction_id && (s?.is_active === true || s?.isActive === true) && !s?.stopped_at);
+  }, [detail]);
+  const isDetailActive = useMemo(() => ((detail as any)?.session?.is_active === true) || ((detail as any)?.session?.isActive === true), [detail]);
+  const isDetailStopped = useMemo(() => ((detail as any)?.session?.is_active === false) || ((detail as any)?.session?.isActive === false) || !!((detail as any)?.session?.stopped_at), [detail]);
+  const isSnapshotAvailable = useMemo(() => (snapshot?.status === 'Available') || (snapshot?.status === 'AVAILABLE'), [snapshot?.status]);
+  const isDesync = useMemo(() => isSnapshotAvailable && hasTx && isDetailActive, [isSnapshotAvailable, hasTx, isDetailActive]);
+  const canStop = useMemo(() => hasTx && isDetailActive, [hasTx, isDetailActive]);
+  const canStart = useMemo(() => (!hasTx) && isSnapshotAvailable, [hasTx, isSnapshotAvailable]);
 
   const loadInitial = useCallback(async (id: string) => {
     try {
@@ -63,7 +63,9 @@ export default function ChargeScreen() {
       setSnapshot(snap);
       setCpName((meta as any)?.name || id);
       if (active) setDetail(active);
-      setState(active?.session?.transaction_id ? 'charging' : 'idle');
+      const s: any = active?.session;
+      const activeNow = !!(s?.transaction_id && (s?.is_active !== false && s?.isActive !== false) && !s?.stopped_at);
+      setState(activeNow ? 'charging' : 'idle');
     } catch (e: any) {
       // keep minimal handling
     }
@@ -75,6 +77,7 @@ export default function ChargeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
   const refreshingRef = useRef(false);
+  const autoStartHandledRef = useRef(false);
 
   useEffect(() => {
     refreshingRef.current = refreshing;
@@ -186,6 +189,7 @@ export default function ChargeScreen() {
 
   const onStart = useCallback(async () => {
     if (!cpId) return;
+    try { LOGGER.API.info('charge.onStart_called', { routeParams: (route as any)?.params, chargeBoxId: cpId, autoStart: !!((route as any)?.params?.autoStart), state, canStart, canStop, isDesync, hasTx }); } catch {}
     Telemetry.track('charge.start_click', { chargeBoxId: cpId });
     setLoading(true); setState('starting'); setCmdError(undefined); setStopStatus('Confirmando início…'); setCommandId(undefined);
     try {
@@ -269,15 +273,7 @@ export default function ChargeScreen() {
     setLoading(false);
   }, [cpId, user]);
 
-  // Auto-start quando navegado com { autoStart: true }
-  useEffect(() => {
-    const auto = (route as any)?.params?.autoStart;
-    if (!auto) return;
-    if (state !== 'idle') return;
-    if (canStart && !loading) {
-      onStart();
-    }
-  }, [route, state, canStart, loading, onStart]);
+  
 
   const refreshNow = useCallback(async () => {
     if (!cpId) return;
@@ -345,8 +341,9 @@ export default function ChargeScreen() {
         }
       }
       // Atualiza estado de UI (charging/idle) com base no detalhe
-      const hasTx = !!(active?.session?.transaction_id ?? detail?.session?.transaction_id);
-      setState(hasTx ? 'charging' : 'idle');
+      const s: any = active?.session ?? detail?.session;
+      const activeNow = !!(s?.transaction_id && (s?.is_active !== false && s?.isActive !== false) && !s?.stopped_at);
+      setState(activeNow ? 'charging' : 'idle');
     } finally {
       setRefreshing(false);
     }
@@ -392,25 +389,52 @@ export default function ChargeScreen() {
       // Confirmar sessão encerrada: aguarda até 30s por completed/stopped_at
       let sess = await getSessionById(txId).catch(() => undefined);
       const startWait = Date.now();
-      while (!(sess?.session?.stopped_at) && sess?.session?.is_active !== false && Date.now() - startWait < 30000) {
+      while (!(sess?.session?.stopped_at) && ((sess?.session?.is_active ?? sess?.session?.isActive) !== false) && Date.now() - startWait < 30000) {
         await new Promise((r) => setTimeout(r, 1500));
         sess = await getSessionById(txId).catch(() => undefined);
       }
       if (sess?.session) {
-        // Alguns backends preservam transaction_id mesmo após o Stop; limpamos para liberar novo início
         const sanitized = { ...sess.session, transaction_id: undefined, is_active: false };
-        setDetail((prev) => ({ ...(prev || {}), session: sanitized, progress: sess.progress, telemetry: sess.telemetry }));
+        setDetail(undefined);
+        setLowPowerSince(undefined);
+        setState('idle');
+        autoStartHandledRef.current = false;
       }
-      setState('idle');
+      // Se não houver confirmação explícita, realizar fallback por snapshot/status pronto ou detail ativo
+      if (!(sess?.session?.stopped_at) && (sess?.session?.is_active !== false)) {
+        const readyStates = ['available','preparing','suspendedev','finishing'];
+        let ready = false;
+        try {
+          const snap2 = await getSnapshot(cpId);
+          setSnapshot(snap2);
+          const lower = String(snap2?.status || '').toLowerCase();
+          if (readyStates.includes(lower)) ready = true;
+        } catch {}
+        if (!ready) {
+          try {
+            const ad = await getActiveDetail(cpId).catch(() => undefined);
+            const sLower = String((ad as any)?.snapshot?.status || (ad as any)?.session?.status || '').toLowerCase();
+            if (readyStates.includes(sLower) || (ad?.session?.is_active === false) || (ad?.session?.isActive === false) || !!ad?.session?.stopped_at) ready = true;
+          } catch {}
+        }
+        if (ready) {
+          setDetail(undefined);
+          setLowPowerSince(undefined);
+          setState('idle');
+          autoStartHandledRef.current = false;
+        }
+      }
       setStopStatus('Sessão encerrada');
       // Atualiza snapshot para refletir status pós-stop e evitar "Erro" por estado desatualizado
       try { const snap = await getSnapshot(cpId); setSnapshot(snap); } catch {}
+      try { await refreshNow(); } catch {}
       // Reload forçado para preparar novo início
       try {
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           setTimeout(() => { window.location.reload(); }, 150);
         } else {
-          nav.reset({ index: 0, routes: [{ name: 'Charge', params: { chargeBoxId: cpId } }] });
+          const keepAuto = (route as any)?.params?.autoStart === true;
+          nav.reset({ index: 0, routes: [{ name: 'Charge', params: { chargeBoxId: cpId, ...(keepAuto ? { autoStart: true } : {}) } }] });
         }
       } catch {}
     } catch (e: any) {
@@ -420,24 +444,27 @@ export default function ChargeScreen() {
         const txId = detail!.session!.transaction_id as number;
         let sess = await getSessionById(txId).catch(() => undefined);
         const wait = Date.now();
-        while (!(sess?.session?.stopped_at) && sess?.session?.is_active !== false && Date.now() - wait < 30000) {
+        while (!(sess?.session?.stopped_at) && ((sess?.session?.is_active ?? sess?.session?.isActive) !== false) && Date.now() - wait < 30000) {
           await new Promise((r) => setTimeout(r, 1500));
           sess = await getSessionById(txId).catch(() => undefined);
         }
         if (sess?.session) {
           const sanitized = { ...sess.session, transaction_id: undefined, is_active: false };
-          setDetail((prev) => ({ ...(prev || {}), session: sanitized, progress: sess.progress, telemetry: sess.telemetry }));
+          setDetail(undefined);
           setState('idle');
           setStopStatus('Sessão encerrada (confirmada)');
           setCmdError(undefined);
           setLoading(false);
           try { const snap2 = await getSnapshot(cpId); setSnapshot(snap2); } catch {}
+          try { await refreshNow(); } catch {}
+          autoStartHandledRef.current = false;
           // Reload forçado para preparar novo início
           try {
             if (Platform.OS === 'web' && typeof window !== 'undefined') {
               setTimeout(() => { window.location.reload(); }, 150);
             } else {
-              nav.reset({ index: 0, routes: [{ name: 'Charge', params: { chargeBoxId: cpId } }] });
+              const keepAuto = (route as any)?.params?.autoStart === true;
+              nav.reset({ index: 0, routes: [{ name: 'Charge', params: { chargeBoxId: cpId, ...(keepAuto ? { autoStart: true } : {}) } }] });
             }
           } catch {}
           return;
@@ -448,6 +475,22 @@ export default function ChargeScreen() {
     }
     setLoading(false);
   }, [cpId, detail]);
+
+  useEffect(() => {
+    const auto = (route as any)?.params?.autoStart;
+    try { LOGGER.API.info('charge.autostart_effect', { params: (route as any)?.params, cpId, autoStart: !!auto, state, canStart, canStop, isDesync, hasTx }); } catch {}
+    if (!auto) return;
+    if (autoStartHandledRef.current) return;
+    if (isDesync && canStop && !loading) {
+      autoStartHandledRef.current = true;
+      onStop();
+      return;
+    }
+    if (!hasTx && !loading) {
+      autoStartHandledRef.current = true;
+      onStart();
+    }
+  }, [route, hasTx, isDesync, canStop, loading, onStart, onStop, state, canStart]);
 
   // Poll de progresso por transactionId
   useEffect(() => {
@@ -470,7 +513,7 @@ export default function ChargeScreen() {
         // A cada ~9s verifica se sessão foi encerrada
         if (tick % 3 === 0) {
           const sess = await getSessionById(txId).catch(() => undefined);
-          const completed = !!sess?.session?.stopped_at || (sess?.session?.is_active === false) || sess?.status === 'completed';
+          const completed = !!sess?.session?.stopped_at || (sess?.session?.is_active === false) || (sess?.session?.isActive === false) || sess?.status === 'completed';
           if (completed) {
             setDetail((prev) => ({ ...(prev || {}), session: sess?.session, progress: sess?.progress, telemetry: sess?.telemetry }));
             setState('idle');
@@ -563,6 +606,7 @@ export default function ChargeScreen() {
   const tele = detail?.telemetry;
   const startedAt = detail?.session?.started_at;
   const [tick, setTick] = useState(0);
+  const [lowPowerSince, setLowPowerSince] = useState<number | undefined>(undefined);
   useEffect(() => {
     const i = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(i);
@@ -643,100 +687,46 @@ export default function ChargeScreen() {
     };
   }, [socPct]);
 
+  useEffect(() => {
+    const thresholdKw = 0.1;
+    const kw = typeof tele?.power_kw === 'number' ? tele.power_kw : undefined;
+    const lowKw = typeof kw === 'number' ? kw < thresholdKw : false;
+    setLowPowerSince((prev) => {
+      if (lowKw) return typeof prev === 'number' ? prev : Date.now();
+      return undefined;
+    });
+  }, [tele?.power_kw]);
+
   const statusHeaderText = useMemo(() => {
     const custom = (route as any)?.params?.statusText;
     if (typeof custom === 'string' && custom.trim()) return custom.trim();
-    return state === 'charging' ? 'Carregamento em progresso' : 'Nenhum carregamento em andamento';
-  }, [route, state]);
+    if (state === 'stopping') return 'Encerrando sessão anterior…';
+    if (isDesync) return 'Sincronizando sessão…';
+    if (canStop) return 'Carregamento em progresso';
+    if (canStart) return 'Pronto para iniciar';
+    return 'Verificando estado do carregador…';
+  }, [route, state, isDesync, canStop, canStart]);
 
   return (
     <View style={{ flex: 1, backgroundColor: UI_TOKENS.colors.tabBg }}>
-      <View style={{ backgroundColor: UI_TOKENS.colors.headerBg, paddingTop: insets.top + 10, paddingBottom: 10, alignItems: 'center' }}>
+      <View style={{ backgroundColor: UI_TOKENS.colors.headerBg, paddingTop: insets.top + 12, paddingBottom: 12, alignItems: 'center' }}>
         <Text style={{ color: UI_TOKENS.colors.white, fontSize: 18, fontWeight: '600' }}>{statusHeaderText}</Text>
       </View>
-      <ScrollView contentInset={{ bottom: tabHeight }} contentContainerStyle={{ paddingBottom: tabHeight }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshNow} colors={[UI_TOKENS.colors.brand]} /> }>
-        {!!cmdError && (
-          <View style={{ marginTop: 12, marginHorizontal: 16, backgroundColor: '#FDE8E8', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }}>
-            <Text style={{ color: '#B91C1C' }}>{cmdError}</Text>
-          </View>
-        )}
-        <View style={{ paddingHorizontal: 16, paddingTop: 8 }} />
-        {/* Card + Gauge */}
-        <View style={{ marginTop: 12, marginHorizontal: 12, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, alignItems: 'center' }}>
-          {(() => {
-            const pct = typeof pctAnim === 'number' ? Math.min(100, Math.max(0, pctAnim)) : undefined;
-            const size = Math.max(150, Math.min(190, Math.floor(height * 0.26)));
-            const strokeW = 10;
-            const radius = (size / 2) - (strokeW / 2);
-            const circumference = 2 * Math.PI * radius;
-            const offset = typeof pct === 'number' ? circumference * (1 - pct / 100) : circumference;
-            const vibrant = state === 'charging';
-            return (
-              <View style={{ height: size + 40, width: size + 40, alignItems: 'center', justifyContent: 'center' }}>
-                <Svg height={size} width={size}>
-                  <Defs>
-                    <LinearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1">
-                      {/* Vermelho → Laranja → Verde → Ciano para efeito vibrante */}
-                      <Stop offset="0%" stopColor="#EF4444" />
-                      <Stop offset="35%" stopColor="#F59E0B" />
-                      <Stop offset="70%" stopColor="#10B981" />
-                      <Stop offset="100%" stopColor="#06B6D4" />
-                    </LinearGradient>
-                  </Defs>
-                  <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#E5E7EB" strokeWidth={strokeW} fill="none" />
-                  <Circle
-                    cx={size / 2}
-                    cy={size / 2}
-                    r={radius}
-                    stroke={vibrant ? 'url(#gaugeGrad)' : UI_TOKENS.colors.brand}
-                    strokeWidth={strokeW}
-                    strokeLinecap="round"
-                    fill="none"
-                    strokeDasharray={`${circumference} ${circumference}`}
-                    strokeDashoffset={offset}
-                    transform={`rotate(-90 ${size / 2} ${size / 2})`}
-                  />
-                  {vibrant && (
-                    <Circle
-                      cx={size / 2}
-                      cy={size / 2}
-                      r={radius}
-                      stroke={'url(#gaugeGrad)'}
-                      strokeWidth={strokeW + 4}
-                      opacity={0.18}
-                      fill="none"
-                      transform={`rotate(-90 ${size / 2} ${size / 2})`}
-                    />
-                  )}
-                </Svg>
-                <View style={{ position: 'absolute', height: size - 60, width: size - 60, borderRadius: (size - 60) / 2, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="car-sport-outline" size={Math.floor((size - 60) * 0.42)} color="#10B981" />
-                  <Ionicons name="flash-outline" size={Math.floor((size - 60) * 0.22)} color="#06B6D4" />
-                  <Text style={{ color: UI_TOKENS.colors.brand, fontSize: 20, fontWeight: '800', marginTop: 6 }}>
-                    {typeof pct === 'number' ? `${pct.toFixed(0)}%` : '--%'}
-                  </Text>
-                </View>
-              </View>
-            );
-          })()}
-          <Text style={{ marginTop: 8, color: '#6B7280', fontSize: 12 }}>{snapshot?.connector || 'Conector 1'}</Text>
-        </View>
-
-        {/* Primary Button */}
-        <View style={{ marginTop: 16, paddingHorizontal: 16 }}>
+      <View style={{ flex: 1 }}>
+        <View style={{ backgroundColor: UI_TOKENS.colors.headerBg, alignItems: 'center', paddingTop: 12, paddingBottom: 12 }}>
+          <ProgressRing percent={typeof pctAnim === 'number' ? Math.min(100, Math.max(0, pctAnim)) : undefined} size={Math.max(150, Math.min(200, Math.floor(height * 0.26)))} vibrant={state === 'charging'} />
+          <Text style={{ marginTop: 8, color: '#D1D5DB', fontSize: 12 }}>{snapshot?.connector || 'Conector 1'}</Text>
           <Pressable
-            onPress={state === 'charging' ? onStop : onStart}
-            disabled={loading || (state === 'charging' ? !canStop : !canStart)}
+            onPress={(isDesync || canStop) ? onStop : onStart}
+            disabled={loading || (!(isDesync || canStop || canStart))}
             accessibilityRole="button"
             style={({ pressed }) => ([
-              { height: 52, borderRadius: 26, backgroundColor: state === 'charging' ? '#9CA3AF' : UI_TOKENS.colors.brand, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
-              pressed && { opacity: 0.9 },
-              (loading || (state === 'charging' ? !canStop : !canStart)) && { opacity: 0.6 },
+              { marginTop: 12, height: 52, minWidth: Math.min(360, Math.floor(width * 0.9)), borderRadius: 26, backgroundColor: '#9CA3AF', alignItems: 'center', justifyContent: 'center' },
+              pressed && { opacity: 0.95 },
+              (loading || (!(isDesync || canStop || canStart))) && { opacity: 0.6 },
             ])}
           >
-            <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '600' }}>
-              {state === 'charging' ? 'Parar Carregamento' : 'Iniciar Carregamento'}
-            </Text>
+            <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '600' }}>{state === 'stopping' ? 'Encerrando…' : ((isDesync || canStop) ? 'Parar Carregamento' : 'Iniciar Carregamento')}</Text>
           </Pressable>
           {state === 'starting' && (
             <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -755,13 +745,22 @@ export default function ChargeScreen() {
               <Text style={{ color: '#9CA3AF', fontSize: 12 }}>commandId: {String(commandId)}</Text>
             </View>
           )}
+          {!!cmdError && (
+            <View style={{ marginTop: 12, marginHorizontal: 16, backgroundColor: '#FDE8E8', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }}>
+              <Text style={{ color: '#B91C1C' }}>{cmdError}</Text>
+            </View>
+          )}
         </View>
-
-        <View style={{ marginTop: 12, paddingHorizontal: 12 }}>
+        <View style={{ flex: 1, paddingHorizontal: 12, paddingTop: 12 }}>
           {(() => {
             const s = String(snapshot?.status || '');
-            const idleReady = state === 'idle' && ['Available','Preparing','SuspendedEV','Finishing'].includes(s);
-            const cols = 3;
+            const idleReadyBase = state === 'idle' && ['Available','Preparing','SuspendedEV','Finishing'].includes(s);
+            const noTx = !detail?.session?.transaction_id || detail?.session?.is_active === false || !!detail?.session?.stopped_at;
+            const thresholdKw = 0.1;
+            const lowKw = typeof tele?.power_kw === 'number' ? tele.power_kw < thresholdKw : true;
+            const lowFor = lowPowerSince ? (Date.now() - lowPowerSince) : 0;
+            const uiSuspended = state === 'charging' && lowKw && lowFor >= 5000;
+            const idleReady = idleReadyBase || uiSuspended || noTx;
             const basis = 32;
             const gap = 8;
             return (
@@ -773,30 +772,13 @@ export default function ChargeScreen() {
                 <TelemetryCard value={idleReady ? 'R$ 0,00' : ((Number(progress?.price_total ?? NaN)).toFixed(2) !== 'NaN' ? `R$ ${(Number(progress?.price_total ?? 0)).toFixed(2)}` : '--')} label="Valor Total" basisPercent={basis} compact />
                 <TelemetryCard value={idleReady ? '0.000' : (typeof progress?.energy_kwh === 'number' ? progress.energy_kwh.toFixed(3) : '--')} label="Energia" unit="kWh" basisPercent={basis} compact />
                 <TelemetryCard value={idleReady ? '--:--' : (startedAt ? startedAt.slice(11,16) : '--:--')} label="Início" basisPercent={basis} compact />
-                <TelemetryCard value={idleReady ? 'R$ 0,00' : ((Number(progress?.price_unit ?? NaN)).toFixed(2) !== 'NaN' ? `R$ ${(Number(progress?.price_unit ?? 0)).toFixed(2)}` : '--')} label="Preço Unit." unit="R$/kWh" basisPercent={basis} compact />
+                <TelemetryCard value={idleReady ? 'R$ 0,00' : ((Number(progress?.price_unit ?? NaN)).toFixed(2) !== 'NaN' ? `R$ ${(Number(progress?.price_unit ?? 0)).toFixed(2)}` : '--')} label="Preço Unitário" unit="R$/kWh" basisPercent={basis} compact />
                 <TelemetryCard value={idleReady ? '0' : (typeof tele?.temperature_c === 'number' ? tele.temperature_c : '--')} label="Temperatura" unit="°C" basisPercent={basis} compact />
               </View>
             );
           })()}
         </View>
-
-        {/* Accordion */}
-        <View style={{ marginTop: 12, marginHorizontal: 12, backgroundColor: '#FFFFFF', borderRadius: 12 }}>
-          <Pressable onPress={() => setExpanded((e) => !e)} accessibilityRole="button" style={{ padding: 16, flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ fontWeight: '600' }}>Sessão & Conector</Text>
-            <Text style={{ color: '#6B7280' }}>{expanded ? '▲' : '▼'}</Text>
-          </Pressable>
-          {expanded && (
-            <View style={{ paddingHorizontal: 16, paddingBottom: 16, gap: 8 }}>
-              <Text>Charge Box ID: {cpId}</Text>
-              <Text>Transaction ID: {detail?.session?.transaction_id ?? '-'}</Text>
-              <Text>Connector ID: 1</Text>
-              <Text>Status: {snapshot?.status ?? '-'}</Text>
-              <Text>Atualizado: {snapshot?.updated_at ?? '-'}</Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
